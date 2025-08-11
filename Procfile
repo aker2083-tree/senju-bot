@@ -1,1 +1,1 @@
-worker: python mind.py
+worker: python miny.py
