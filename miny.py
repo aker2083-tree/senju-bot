@@ -1,8 +1,11 @@
 import os
 import telebot
 
-TOKEN = os.getenv("BOT_TOKEN")  # 從 Railway 環境變數讀取
+TOKEN = os.environ.get("BOT_TOKEN")
+if not TOKEN:
+    raise RuntimeError("Missing env: BOT_TOKEN")
 bot = telebot.TeleBot(TOKEN)
+
 
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
