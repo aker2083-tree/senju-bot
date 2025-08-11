@@ -1,2 +1,0 @@
-# senju-bot
-Telegram Bot
