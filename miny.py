@@ -1,19 +1,14 @@
-import os
-import telebot
+from flask import Flask, request
+from brain_router import brain_router
 
-TOKEN = os.environ.get("BOT_TOKEN")
-if not TOKEN:
-    raise RuntimeError("Missing env: BOT_TOKEN")
-bot = telebot.TeleBot(TOKEN)
+app = Flask(__name__)
 
-
-@bot.message_handler(commands=['start', 'help'])
-def send_welcome(message):
-    bot.reply_to(message, "哈囉！我是千手機器人 🤖")
-
-@bot.message_handler(func=lambda message: True)
-def echo_all(message):
-    bot.reply_to(message, message.text)
+@app.route("/", methods=["POST"])
+def handle():
+    data = request.json
+    user_input = data.get("text", "")
+    reply = brain_router(user_input)
+    return {"reply": reply}
 
 if __name__ == "__main__":
-    bot.polling()
+    app.run(host="0.0.0.0", port=5000)
