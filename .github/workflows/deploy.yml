@@ -1,0 +1,32 @@
+name: Deploy to Railway
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Deploy to Railway
+        run: |
+          npm install -g railway
+          railway login --apiKey ${{ secrets.RAILWAY_API_KEY }}
+          railway up
+        env:
+          RAILWAY_API_KEY: ${{ secrets.RAILWAY_API_KEY }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
