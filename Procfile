@@ -1,1 +1,1 @@
-worker: python miny.py
+web: node index.js
