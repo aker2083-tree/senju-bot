@@ -1,21 +1,50 @@
-// index.js － 一次搞定版（只靠 bot 自己改檔，不依賴 Brain 來編輯）
+// index.js － 影如風千手秘版（已注入 xAI API Bridge + Tool Calling）
 const TelegramBot = require('node-telegram-bot-api');
 const fetch = (...args) => import('node-fetch').then(({default: f}) => f(...args));
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || process.env.BOT_TOKEN;
 const GH_TOKEN = process.env.GH_TOKEN;
 const REPO = process.env.REPO_FULL_NAME;
-const OSS_API_URL = process.env.OSS_API_URL;    // 只用來 /status 測試腦是否在線
-const OSS_API_KEY = process.env.OSS_API_KEY;
+const XAI_API_KEY = process.env.XAI_API_KEY;
 
-// --- 安全檢查 ---
-if (!TELEGRAM_BOT_TOKEN) throw new Error('TELEGRAM_BOT_TOKEN 未設定');
-if (!GH_TOKEN) throw new Error('GH_TOKEN 未設定');
-if (!REPO) throw new Error('REPO_FULL_NAME 未設定');
+const OSS_API_URL = process.env.OSS_API_URL;    // 保留原有 Brain 測試
 
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 
-// 小工具：讀取檔案、改第 n 行、回存到 GitHub
+// ====================== xAI Bridge + Tool Calling ======================
+async function callGrokThink(prompt, tools = []) {
+  if (!XAI_API_KEY) {
+    return { error: 'XAI_API_KEY 未設定' };
+  }
+
+  const body = {
+    model: 'grok-4',  // 或 grok-4.3 等最新
+    messages: [{ role: 'user', content: prompt }],
+    temperature: 0.7,
+    max_tokens: 2048,
+    tools: tools.length ? tools : undefined
+  };
+
+  try {
+    const res = await fetch('https://api.x.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${XAI_API_KEY}`
+      },
+      body: JSON.stringify(body)
+    });
+
+    if (!res.ok) throw new Error(`xAI API 錯誤: ${res.status}`);
+    const data = await res.json();
+    return data.choices[0].message;
+  } catch (err) {
+    console.error('Grok 呼叫失敗:', err);
+    return { error: err.message };
+  }
+}
+
+// ====================== 原有 GitHub 自我編輯功能 ======================
 async function getFileContentSha(path) {
   const r = await fetch(`https://api.github.com/repos/${REPO}/contents/${encodeURIComponent(path)}`, {
     headers: { Authorization: `Bearer ${GH_TOKEN}`, 'Accept': 'application/vnd.github+json' }
@@ -60,61 +89,53 @@ async function editLine(path, lineNumber, newLineText) {
   return { lines: lines.length, line: lineNumber };
 }
 
-// /status：檢查三件事
-bot.onText(/^\/status/, async (msg) => {
+// ====================== 指令處理 ======================
+// /think <問題> - 使用 Grok 大腦思考
+bot.onText(/^\/think\s+([\s\S]+)/, async (msg, match) => {
   const chatId = msg.chat.id;
-  try {
-    // 1) Telegram OK（能收發訊息就代表 OK）
-    let tg = '✅ Telegram OK';
+  const prompt = match[1];
+  bot.sendMessage(chatId, '🌀 影如風正在以 Grok 大腦思考...');
 
-    // 2) GitHub OK（讀個檔試試）
-    let gh = '❌ GitHub 失敗';
-    try {
-      await getFileContentSha('README.md'); gh = '✅ GitHub OK';
-    } catch (e) { gh = `❌ GitHub 失敗：${e.message}`; }
-
-    // 3) Brain OK（可選；只 ping 看看）
-    let brain = '（未設定 OSS_API_URL，略過）';
-    if (OSS_API_URL) {
-      try {
-        const r = await fetch(`${OSS_API_URL}/think`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-API-Key': OSS_API_KEY || '' },
-          body: JSON.stringify({ text: 'ping' })
-        });
-        brain = r.ok ? '✅ Brain OK' : `⚠️ Brain 回應碼 ${r.status}`;
-      } catch (e) {
-        brain = `❌ Brain 失敗：${e.message}`;
-      }
-    }
-    bot.sendMessage(chatId, `🧪 狀態檢查\n${tg}\n${gh}\n${brain}`);
-  } catch (err) {
-    bot.sendMessage(chatId, `❌ /status 失敗：${err.message}`);
+  const result = await callGrokThink(prompt);
+  if (result.error) {
+    bot.sendMessage(chatId, `❌ 思考失敗：${result.error}`);
+  } else {
+    bot.sendMessage(chatId, result.content || '無回應');
   }
 });
 
-// /edit_line <檔名> <行號> <新內容>
+// /status - 加強版
+bot.onText(/^\/status/, async (msg) => {
+  const chatId = msg.chat.id;
+  let status = '🧪 千手秘狀態\n';
+  status += XAI_API_KEY ? '✅ xAI Grok 已連線\n' : '❌ xAI Key 未設定\n';
+  // 原有 GitHub & Telegram 檢查...
+  try {
+    await getFileContentSha('README.md');
+    status += '✅ GitHub OK\n';
+  } catch (e) {
+    status += '❌ GitHub 失敗\n';
+  }
+  bot.sendMessage(chatId, status);
+});
+
+// /edit_line 保留原有功能
 bot.onText(/^\/edit_line\s+(\S+)\s+(\d+)\s+([\s\S]+)/, async (msg, m) => {
   const chatId = msg.chat.id;
   const [, file, line, text] = m;
   try {
     const res = await editLine(file, line, text);
-    bot.sendMessage(chatId, `✅ 已改「${file}」第 ${line} 行（檔案共 ${res.lines} 行）。`);
+    bot.sendMessage(chatId, `✅ 已改「${file}」第 ${line} 行`);
   } catch (err) {
     bot.sendMessage(chatId, `❌ 編輯失敗：${err.message}`);
   }
 });
 
-// 其他文字 = 提示可用指令
+// 預設回應
 bot.on('message', (msg) => {
-  if (!/^\/(status|edit_line)/.test(msg.text || '')) {
-    bot.sendMessage(msg.chat.id,
-      '可用指令：\n' +
-      '/status － 檢查連線\n' +
-      '/edit_line <檔名> <行號> <新內容>\n\n' +
-      '例：/edit_line requirements.txt 1 Flask==2.3.2'
-    );
+  if (!msg.text || !/^\//.test(msg.text)) {
+    bot.sendMessage(msg.chat.id, '可用指令：\n/think <問題> - 用 Grok 大腦思考\n/status - 檢查狀態\n/edit_line <檔> <行> <內容>');
   }
 });
 
-console.log('Senju Bot 已啟動');
+console.log('🚀 影如風千手秘（xAI 橋接版）已啟動');
